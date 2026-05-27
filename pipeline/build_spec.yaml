@@ -1,0 +1,68 @@
+version: 0.1
+component: build
+timeoutInSeconds: 6000
+shell: bash
+
+env:
+  variables:
+    APP_ID: "100"
+    ARTIFACT_NAME: "apex-app"
+    WORKSPACE: "MY_WORKSPACE"
+  exportedVariables:
+    - BUILD_VERSION
+
+steps:
+  - type: Command
+    name: "Set version from commit"
+    timeoutInSeconds: 60
+    command: |
+      export BUILD_VERSION=$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M)
+      echo "Building version: $BUILD_VERSION"
+
+  - type: Command
+    name: "SQL lint and static analysis"
+    timeoutInSeconds: 300
+    command: |
+      set -euo pipefail
+      if grep -rn "DROP TABLE" db/changelog/; then
+        echo "ERROR: Destructive DDL (DROP TABLE) found in changelog"
+        exit 1
+      fi
+      if grep -rn "TRUNCATE" db/changelog/; then
+        echo "ERROR: Destructive DML (TRUNCATE) found in changelog"
+        exit 1
+      fi
+      sqlcl -nolog <<EOF
+      liquibase validate -changelog-file=db/changelog/master.xml
+      exit
+      EOF
+
+  - type: Command
+    name: "Validate APEX export integrity"
+    timeoutInSeconds: 60
+    command: |
+      set -euo pipefail
+      if [ ! -f "apex/f${APP_ID}/install.sql" ]; then
+        echo "ERROR: APEX install.sql missing for app ${APP_ID}"
+        exit 1
+      fi
+      if ! grep -q "wwv_flow_imp.import_begin" "apex/f${APP_ID}/install.sql"; then
+        echo "ERROR: install.sql does not appear to be a valid APEX export"
+        exit 1
+      fi
+
+  - type: Command
+    name: "Package deployment bundle"
+    timeoutInSeconds: 300
+    command: |
+      set -euo pipefail
+      mkdir -p build/${ARTIFACT_NAME}-${BUILD_VERSION}
+      cp -r db/ apex/ tests/ pipeline/ build/${ARTIFACT_NAME}-${BUILD_VERSION}/
+      echo "${BUILD_VERSION}" > build/${ARTIFACT_NAME}-${BUILD_VERSION}/VERSION
+      cd build && tar -czf ${ARTIFACT_NAME}-${BUILD_VERSION}.tar.gz ${ARTIFACT_NAME}-${BUILD_VERSION}/
+      ls -lh ${ARTIFACT_NAME}-${BUILD_VERSION}.tar.gz
+
+outputArtifacts:
+  - name: apex_bundle
+    type: BINARY
+    location: build/${ARTIFACT_NAME}-${BUILD_VERSION}.tar.gz

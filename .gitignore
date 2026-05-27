@@ -1,0 +1,16 @@
+build/
+*.tar.gz
+
+wallet*.zip
+cwallet.sso
+ewallet.p12
+tnsnames.ora
+sqlnet.ora
+
+sqlcl-history.txt
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
